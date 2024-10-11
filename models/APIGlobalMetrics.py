@@ -5,9 +5,11 @@ class APIGlobalMetrics(APIFetch):
         if url is None:
             url = "https://api.coinlore.net/api/global/"
         super().__init__(url)
-
+        self.url = url
     
     def getKeyValue(self, dictionary):
+        if isinstance(dictionary, list) and len(dictionary) > 0:
+            dictionary = dictionary[0]
         return {
             "coins_count": dictionary.get("coins_count", 0),
             "active_markets": dictionary.get("active_markets", 0),

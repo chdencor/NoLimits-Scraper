@@ -6,21 +6,14 @@ class GlobalMetricsService:
     """
     def __init__(self):
         self.data = APIGlobalMetrics()
-        self._respuesta = None
+        self._respuesta = self.data.APICall(self.data.url)
         self._parsed_data = None
-
-    @property
-    def respuesta(self):
-        """Realiza la llamada a la API solo cuando es necesario."""
-        if self._respuesta is None:
-            self._respuesta = self.data.APICall()
-        return self._respuesta
 
     @property
     def parsed_data(self):
         """Parsea la respuesta de la API solo cuando es necesario."""
         if self._parsed_data is None:
-            parsed_response = self.data.APIParsing(self.respuesta)
+            parsed_response = self.data.APIParsing(self._respuesta)
             self._parsed_data = self.data.getKeyValue(parsed_response)
         return self._parsed_data
 
