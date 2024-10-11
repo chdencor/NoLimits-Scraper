@@ -14,4 +14,4 @@ class APICripto(APIFetch):
     """
     def getKeyValue(self, jsonDictionary):
         dataList = jsonDictionary.get("data")
-        return dataList  # Retornamos la lista completa
+        return dataList

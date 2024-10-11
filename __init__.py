@@ -1,7 +1,7 @@
 from dotenv import load_dotenv
 import os
 from db.dbORM import dbORM
-from utils.dataLoader import dataLoader
+from utils.dbBroker import dataLoader
 
 def createScraper():
     load_dotenv('db_url.env')

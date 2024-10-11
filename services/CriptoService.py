@@ -1,4 +1,4 @@
-from models.APICripto import APICripto
+from models.APICriptoTicker import APICripto
 
 class CriptoService:
     """
@@ -6,18 +6,21 @@ class CriptoService:
     """
     def __init__(self):
         self.data = APICripto()
-        self.respuesta = self.data.APICall(self.data.url)  # Llamada a la API
+        self._respuesta = self.data.APICall(self.data.url)  # Llamada a la API
+        self._parsed_data = None 
 
-    def parseResponse(self):
+    @property
+    def parsed_data(self):
         """
         Convierte la respuesta de la API a JSON y la parsea para obtener los datos.
 
         :return: Lista de diccionarios con los datos de las criptomonedas.
         :rtype: list
         """
-        parsedResponse = self.data.APIParsing(self.respuesta)
-        dataRetrieved = self.data.getKeyValue(parsedResponse)
-        return dataRetrieved
+        if self._parsed_data is None:  # Si no se ha parseado, realiza el parseo
+            parsed_response = self.data.APIParsing(self._respuesta)
+            self._parsed_data = self.data.getKeyValue(parsed_response)
+        return self._parsed_data
 
     def getCriptoData(self, criptoId):
         """
@@ -28,22 +31,20 @@ class CriptoService:
         :return: Diccionario con los datos de la criptomoneda.
         :rtype: dict
         """
-        dataRetrieved = self.parseResponse()
-        for item in dataRetrieved:
+        for item in self.parsed_data:
             if item.get("id") == criptoId:
                 return item
         return None
     
-    def getAllIds(self):
+    @property
+    def all_ids(self):
         """
         Obtiene una lista de todos los IDs de las criptomonedas.
         
         :return: Lista de IDs.
         :rtype: list
         """
-        globalData = self.parseResponse()
-        idList = [item.get('id') for item in globalData if item.get('id') is not None]
-        return idList
+        return [item.get('id') for item in self.parsed_data if item.get('id') is not None]
 
     def getSymbol(self, criptoId):
         """
@@ -224,4 +225,3 @@ class CriptoService:
         """
         criptoData = self.getCriptoData(criptoId)
         return criptoData.get("msupply") if criptoData else None
-

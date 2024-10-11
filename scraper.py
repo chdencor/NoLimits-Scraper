@@ -1,5 +1,6 @@
 from colorama import init, Fore, Style
 from __init__ import createScraper
+import traceback
 
 # Initialize colorama
 init()
@@ -30,3 +31,5 @@ if __name__ == "__main__":
         print("Ejecución interrumpida por el usuario. Saliendo...")
     except Exception as e:
         print(f"Ocurrió un error: {e}")
+        print("Traceback:")
+        traceback.print_exc()

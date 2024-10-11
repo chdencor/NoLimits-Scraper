@@ -10,7 +10,7 @@ def dataLoader(dbInstance):
 
     while True:
         # Obtener datos de la API
-        data = cripto.parseResponse()
+        data = cripto.parsed_data  # Cambiado aquí
         idsObtenidos = []
         successful_inserts = 0
         failed_inserts = 0
@@ -20,7 +20,6 @@ def dataLoader(dbInstance):
         idsNuevos = registroService.criptoNueva()
         for new_id in idsNuevos:
             if new_id not in idsObtenidos:
-                # Supongamos que tienes una función que obtiene la información de la cripto por ID
                 item = cripto.getCriptoData(new_id)
                 if item:
                     data.append(item)
