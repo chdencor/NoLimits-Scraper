@@ -2,7 +2,6 @@
 Operaciones para guardar los datos en un archivo txt
 """
 
-from models.SQLAlchemyTables import Criptomoneda
 import os
 import json
 

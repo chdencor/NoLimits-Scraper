@@ -1,10 +1,5 @@
-from sqlalchemy import create_engine, Column, Integer, String, Float
-from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
-from models.SQLAlchemyTables import Criptomoneda, Registro
-
-# Configuración base
-Base = declarative_base()
 
 class dbORM:
     def __init__(self, dbUrl):
@@ -12,102 +7,93 @@ class dbORM:
         self.Session = sessionmaker(bind=self.engine)
         self.session = self.Session()
 
-    def createTables(self):
-        """Crear las tablas si no existen."""
-        Base.metadata.create_all(self.engine)
-
     def close(self):
-        """Cerrar la sesión."""
         self.session.close()
 
-    # Operaciones CRUD para Criptomonedas
-    def createCripto(self, name, symbol, msupply):
-        """Insertar una nueva criptomoneda si no existe."""
-        if not self.checkSymbolExists(symbol):
-            nuevaCripto = Criptomoneda(name=name, symbol=symbol, msupply=msupply)
-            self.session.add(nuevaCripto)
-            self.session.commit()
-            return nuevaCripto.id
-        return None
+    def batch_insert(self, table_name, values_list):
+        """Realizar inserciones por lotes en la tabla especificada."""
+        try:
+            if values_list:
+                # Crear una consulta con múltiples valores
+                columns = values_list[0].keys()
+                placeholders = ', '.join(f':{col}' for col in columns)
+                insert_query = f"INSERT INTO {table_name} ({', '.join(columns)}) VALUES ({placeholders})"
+                
+                # Ejecutar el batch insert
+                self.session.execute(text(insert_query), values_list)
+                self.session.commit()
+        except Exception as e:
+            self.session.rollback()
+            print(f"Error al insertar en {table_name}: {e}")
 
+    def insert_api_batch(self, api_list):
+        """Insertar múltiples registros en la tabla 'api'."""
+        self.batch_insert('api', api_list)
 
-    def checkSymbolExists(self, symbol):
-        """Verificar si el símbolo de una criptomoneda ya existe."""
-        return self.session.query(Criptomoneda).filter_by(symbol=symbol).first() is not None
+    def insert_register_batch(self, register_list):
+        """Insertar múltiples registros en la tabla 'registros'."""
+        self.batch_insert('registros', register_list)
 
-    def fetchAllCriptos(self):
-        """Obtener todas las criptomonedas."""
-        return self.session.query(Criptomoneda).all()
+    def insert_criptomoneda_batch(self, cripto_list):
+        """Insertar múltiples registros en la tabla 'criptomonedas'."""
+        self.batch_insert('criptomonedas', cripto_list)
 
-    def fetchOneCripto(self, idValue):
-        """Obtener una criptomoneda por ID."""
-        return self.session.query(Criptomoneda).get(idValue)
+    def insert_api_relationship_batch(self, table_name, relationship_list, unique_columns):
+        """Insertar múltiples relaciones en la tabla especificada, evitando duplicados."""
+        try:
+            for relationship in relationship_list:
+                filters = ' AND '.join([f"{col} = :{col}" for col in unique_columns])
+                query = f"SELECT 1 FROM {table_name} WHERE {filters}"
     
+                # Verificar si la relación ya existe
+                existing_relationship = self.session.execute(
+                    text(query), {col: relationship[col] for col in unique_columns}
+                ).fetchone()
+    
+                # Si no existe, insertar la nueva relación
+                if not existing_relationship:
+                    self.batch_insert(table_name, [relationship])
+                else:
+                    print(f"La relación en {table_name} ya existe: {relationship}")
+    
+            self.session.commit()
+        except Exception as e:
+            self.session.rollback()
+            print(f"Error al insertar relaciones en {table_name}: {e}")
+
+    # Métodos para cada tabla intermedia
+    def insert_api_criptomoneda_batch(self, relationship_list):
+        self.insert_api_relationship_batch('api_criptomonedas', relationship_list, ['api_id', 'criptomoneda_id'])
+
+    def insert_api_mercado_batch(self, relationship_list):
+        self.insert_api_relationship_batch('api_mercados', relationship_list, ['api_id', 'mercado_id'])
+
+    def insert_api_registro_batch(self, relationship_list):
+        self.insert_api_relationship_batch('api_registros', relationship_list, ['api_id', 'registro_id'])
+
+    def insert_api_metrica_general_batch(self, relationship_list):
+        self.insert_api_relationship_batch('api_metricas_generales', relationship_list, ['api_id', 'metrica_general_id'])
+
+    def insert_api_exchange_batch(self, relationship_list):
+        self.insert_api_relationship_batch('api_exchanges', relationship_list, ['api_id', 'exchange_id'])
+
+
     def fetchOneCriptoBySymbol(self, symbol):
         """Obtener una criptomoneda por símbolo."""
-        return self.session.query(Criptomoneda).filter_by(symbol=symbol).first()
+        result = self.session.execute(text(""" 
+            SELECT * FROM get_criptomoneda_by_symbol(:symbol);
+        """), {'symbol': symbol}).fetchone()
 
-    def updateCripto(self, idValue, columns, values):
-        """Actualizar los datos de una criptomoneda."""
-        cripto = self.session.query(Criptomoneda).get(idValue)
-        if cripto:
-            for col, val in zip(columns, values):
-                setattr(cripto, col, val)
-            self.session.commit()
-
-    def deleteCripto(self, idValue):
-        """Eliminar una criptomoneda."""
-        cripto = self.session.query(Criptomoneda).get(idValue)
-        if cripto:
-            self.session.delete(cripto)
-            self.session.commit()
-
-    # Operaciones CRUD para Registros
-    def createRegistro(self, cripto_id, price_usd, percent_change_24h, percent_change_1h,
-                       percent_change_7d, price_btc, market_cap_usd,
-                       volume24, volume24a, csupply, tsupply):
-        """Insertar un nuevo registro asociado a una criptomoneda."""
-        # Verificar si la criptomoneda existe
-        cripto = self.session.query(Criptomoneda).get(cripto_id)
-        if not cripto:
-            raise ValueError("La criptomoneda con el ID proporcionado no existe.")
+        return result if result else None
+    
+    def fetchOneApiByName(self, nombre):
+        """Obtener una API por nombre."""
+        result = self.session.execute(text(""" 
+            SELECT * FROM fetchOneApiByName(:nombre);
+        """), {'nombre': nombre}).fetchone()
+        return result if result else None
         
-        nuevo_registro = Registro(
-            cripto_id=cripto_id,  # Asociar el registro a la criptomoneda
-            price_usd=price_usd,
-            percent_change_24h=percent_change_24h,
-            percent_change_1h=percent_change_1h,
-            percent_change_7d=percent_change_7d,
-            price_btc=price_btc,
-            market_cap_usd=market_cap_usd,
-            volume24=volume24,
-            volume24a=volume24a,
-            csupply=csupply,
-            tsupply=tsupply,
-        )
-        self.session.add(nuevo_registro)
-        self.session.commit()
-        return nuevo_registro.id
-
-    def fetchAllRegistros(self):
-        """Obtener todos los registros."""
-        return self.session.query(Registro).all()
-
-    def fetchOneRegistro(self, idValue):
-        """Obtener un registro por ID."""
-        return self.session.query(Registro).get(idValue)
-
-    def updateRegistro(self, idValue, columns, values):
-        """Actualizar un registro."""
-        registro = self.session.query(Registro).get(idValue)
-        if registro:
-            for col, val in zip(columns, values):
-                setattr(registro, col, val)
-            self.session.commit()
-
-    def deleteRegistro(self, idValue):
-        """Eliminar un registro."""
-        registro = self.session.query(Registro).get(idValue)
-        if registro:
-            self.session.delete(registro)
-            self.session.commit()
+    def fetchOneRegisterId(self, criptoId):
+        query = text("SELECT id FROM registros WHERE criptomoneda_id = :criptoId")
+        result = self.session.execute(query, {'criptoId': criptoId}).fetchone()
+        return result.id if result else None

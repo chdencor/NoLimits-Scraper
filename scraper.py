@@ -29,7 +29,3 @@ if __name__ == "__main__":
         createScraper()
     except KeyboardInterrupt:
         print("Ejecución interrumpida por el usuario. Saliendo...")
-    except Exception as e:
-        print(f"Ocurrió un error: {e}")
-        print("Traceback:")
-        traceback.print_exc()
