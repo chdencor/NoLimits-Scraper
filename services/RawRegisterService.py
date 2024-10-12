@@ -29,11 +29,8 @@ class RegistroService:
             data = {"idsRegistrados": [], "idsNuevos": []}
         return data
 
-
     def _saveToFile(self):
-        """
-        Guarda los datos actuales en el archivo JSON.
-        """
+        """Guarda los datos actuales en el archivo JSON."""
         try:
             with open(self.archivo, 'w') as file:
                 json.dump(self.criptoRegistrado, file, indent=4)
@@ -41,10 +38,12 @@ class RegistroService:
             print(f"Error al guardar el archivo: {e}")
 
     def criptoNueva(self):
-        """
-        Obtiene la lista de IDs nuevos.
-        """
+        """Obtiene la lista de IDs nuevos."""
         return self.criptoRegistrado.get('idsNuevos', [])
+
+    def criptoTodas(self):
+        """Obtiene la lista de todos los IDs registrados."""
+        return self.criptoRegistrado.get('idsRegistrados', [])
 
     def actualizarCripto(self, idsObtenidos):
         """

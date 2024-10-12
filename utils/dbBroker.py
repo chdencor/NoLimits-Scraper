@@ -16,54 +16,76 @@ def insertApiIfNotExists(dbInstance, api_name, api_url):
         return existing_api.id
     except Exception as e:
         print(f"Error al insertar la API: {str(e)}")
-        traceback.print_exc()  # Imprimir el traceback del error
+        traceback.print_exc()
         return None
-    
-def processNewCryptos(dbInstance, cripto, api_id):
-    """Procesa nuevas criptomonedas y registra su información."""
+
+def processCryptos(dbInstance, cripto, api_id):
+    """Procesa todas las criptomonedas y registra su información.""" 
     registroService = RegistroService()
     ids_obtenidos = []
+    
+    # Obtener todos los IDs de criptomonedas existentes
+    existing_cryptos = {crypto.symbol: crypto.id for crypto in dbInstance.fetchAllCriptomonedas()}
 
-    # Obtener y procesar nuevas criptomonedas
-    ids_nuevos = registroService.criptoNueva()
-    for new_id in ids_nuevos:
-        if new_id not in ids_obtenidos:
-            item = cripto.getCriptoData(new_id)
-            if item:
-                ids_obtenidos.append(item['id'])  # Guardar el ID para evitar duplicados
-                existingCripto = dbInstance.fetchOneCriptoBySymbol(item['symbol'])
+    ids_todas = registroService.criptoTodas()
+    
+    # Recopilar datos para la inserción en lotes
+    new_cryptos = []
+    registros = []
+    relaciones = []
 
-                try:
-                    if not existingCripto:
-                        msupply = item.get('msupply') or 0
-                        dbInstance.insertCriptomoneda(name=item['name'], symbol=item['symbol'], msupply=msupply)
-                        existingCripto = dbInstance.fetchOneCriptoBySymbol(item['symbol'])
+    for crypto_id in ids_todas:
+        item = cripto.getCriptoData(crypto_id)
+        
+        if item and item['id'] not in ids_obtenidos:
+            ids_obtenidos.append(item['id'])
+            symbol = item['symbol']
+            existingCriptoId = existing_cryptos.get(symbol)
 
-                    registro_values = (
-                        existingCripto.id if existingCripto else None,
-                        float(item.get('price_usd') or 0),
-                        float(item.get('percent_change_24h') or 0),
-                        float(item.get('percent_change_1h') or 0),
-                        float(item.get('percent_change_7d') or 0),
-                        float(item.get('price_btc') or 0),
-                        float(item.get('market_cap_usd') or 0),
-                        float(item.get('volume24') or 0),
-                        float(item.get('volume24a') or 0),
-                        float(item.get('csupply') or 0),
-                        float(item.get('tsupply') or 0)
-                    )
+            try:
+                if existingCriptoId is None:
+                    msupply = item.get('msupply') or 0
+                    new_cryptos.append((item['name'], symbol, msupply))
+                    # Se obtiene el id mediante la inserción directa en la base de datos
+                    existingCriptoId = dbInstance.insertCriptomoneda(item['name'], symbol, msupply)
 
-                    dbInstance.insertRegister(*registro_values)
+                # Valores del registro a insertar
+                registro_values = (
+                    existingCriptoId,
+                    float(item.get('price_usd') or 0),
+                    float(item.get('percent_change_24h') or 0),
+                    float(item.get('percent_change_1h') or 0),
+                    float(item.get('percent_change_7d') or 0),
+                    float(item.get('price_btc') or 0),
+                    float(item.get('market_cap_usd') or 0),
+                    float(item.get('volume24') or 0),
+                    float(item.get('volume24a') or 0),
+                    float(item.get('csupply') or 0),
+                    float(item.get('tsupply') or 0)
+                )
 
-                    if existingCripto:
-                        dbInstance.insertMultipleApiCriptomoneda(api_id, [existingCripto.id])
+                registros.append(registro_values)
+                if existingCriptoId:
+                    relaciones.append((api_id, existingCriptoId))
 
-                except Exception as e:
-                    print(f"Error al procesar la criptomoneda {item['name']}: {str(e)}")
-                    traceback.print_exc()
+            except Exception as e:
+                print(f"Error al procesar la criptomoneda {item['name']}: {str(e)}")
+                traceback.print_exc()
+
+    # Inserción masiva de criptomonedas
+    if new_cryptos:
+        dbInstance.insertMultipleApiCriptomoneda(api_id, [crypto[1] for crypto in new_cryptos])
+
+    # Inserción masiva de registros
+    if registros:
+        dbInstance.insertMultipleRegisters(registros)
+
+    # Inserción de relaciones
+    if relaciones:
+        dbInstance.insertMultipleApiCriptomoneda(api_id, [rel[1] for rel in relaciones])
 
 def dataLoader(dbInstance):
-    """Carga los datos de las criptomonedas."""
+    """Carga los datos de las criptomonedas.""" 
     cripto = CriptoService()
     api = APICripto()
 
@@ -72,11 +94,10 @@ def dataLoader(dbInstance):
         return
 
     while True:
-        start_time = time.time()  # Inicio del cronómetro
-        processNewCryptos(dbInstance, cripto, api_id)
-        end_time = time.time()  # Fin del cronómetro
+        start_time = time.time()
+        processCryptos(dbInstance, cripto, api_id)
+        end_time = time.time()
         
-        # Calcular el tiempo total de carga
         total_time = end_time - start_time
         print(f"Carga de datos completada en {total_time:.2f} segundos. Esperando a la próxima ejecución...")
         

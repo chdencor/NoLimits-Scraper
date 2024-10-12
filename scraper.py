@@ -2,7 +2,7 @@ from colorama import init, Fore, Style
 from __init__ import createScraper
 import traceback
 
-# Initialize colorama
+
 init()
 
 if __name__ == "__main__":
