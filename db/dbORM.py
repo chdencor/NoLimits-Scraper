@@ -1,38 +1,52 @@
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import scoped_session
 
 class dbORM:
     def __init__(self, dbUrl):
         self.engine = create_engine(dbUrl)
-        self.Session = sessionmaker(bind=self.engine)
-        self.session = self.Session()
+        self.Session = scoped_session(sessionmaker(bind=self.engine))
 
     def close(self):
         """Cerrar la sesión."""
-        self.session.close()
+        self.Session.remove()  # Close session properly
+
+    def __enter__(self):
+        """Context manager enter method."""
+        self.current_session = self.Session()
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        """Context manager exit method."""
+        self.close()
 
     def insertRelationship(self, insert_function, **kwargs):
         """Método genérico para insertar relaciones en la base de datos."""
         try:
-            self.session.execute(text(f"SELECT {insert_function}({', '.join(f':{k}' for k in kwargs.keys())});"), kwargs)
-            self.session.commit()
+            self.current_session.execute(text(f"SELECT {insert_function}({', '.join(f':{k}' for k in kwargs.keys())});"), kwargs)
+            self.current_session.commit()
         except Exception as e:
-            self.session.rollback()
+            self.current_session.rollback()
             print(f"Error al insertar en {insert_function}: {e}")
 
     def insertMultipleCryptocurrencies(self, cryptocurrencies):
         """Insertar múltiples criptomonedas, evitando duplicados."""
-        existing_symbols = {row[0] for row in self.session.execute(text("SELECT symbol FROM criptomonedas;")).fetchall()}
+        existing_symbols = {row[0] for row in self.current_session.execute(text("SELECT symbol FROM criptomonedas;")).fetchall()}
         new_cryptos = [(name, symbol, msupply) for name, symbol, msupply in cryptocurrencies if symbol not in existing_symbols]
 
         for name, symbol, msupply in new_cryptos:
             self.insertCriptomoneda(name, symbol, msupply)
 
     def insertMultipleRegisters(self, registers):
-        """Insertar múltiples registros en la tabla 'registros'."""
-        for cripto_id, price_usd, percent_change_24h, percent_change_1h, percent_change_7d, price_btc, market_cap_usd, volume24, volume24a, csupply, tsupply in registers:
-            self.insertRegister(cripto_id, price_usd, percent_change_24h, percent_change_1h,
-                                percent_change_7d, price_btc, market_cap_usd, volume24, volume24a, csupply, tsupply)
+     """Insertar múltiples registros en la tabla 'registros'."""
+     for register in registers:
+         try:
+             cripto_id, price_usd, percent_change_24h, percent_change_1h, percent_change_7d, price_btc, market_cap_usd, volume24, volume24a, csupply, tsupply, ranking = register  # Asegúrate de incluir ranking aquí
+             self.insertRegister(cripto_id, price_usd, percent_change_24h, percent_change_1h,
+                                 percent_change_7d, price_btc, market_cap_usd, volume24, volume24a, csupply, tsupply, ranking)
+         except ValueError as e:
+             print(f"Error unpacking register: {register}. Error: {e}")
+
 
     def insertApi(self, nombre, url, metodo, cantidad_parametros, tipo_autenticacion, 
                   formato_respuesta, limite_uso, tiempo_respuesta_promedio_ms, estado='activo'):
@@ -46,14 +60,22 @@ class dbORM:
                                 estado=estado)
 
     def insertRegister(self, criptomoneda_id, price_usd, percent_change_24h, percent_change_1h,
-                       percent_change_7d, price_btc, market_cap_usd, volume24, volume24a, csupply, tsupply):
+                   percent_change_7d, price_btc, market_cap_usd, volume24, volume24a, 
+                   csupply, tsupply, ranking):
         """Insertar un nuevo registro en la tabla 'registros' usando la función de PostgreSQL."""
-        self.insertRelationship('insert_register', criptomoneda_id=criptomoneda_id, 
-                                price_usd=price_usd, percent_change_24h=percent_change_24h, 
+        self.insertRelationship('insert_register', 
+                                criptomoneda_id=criptomoneda_id, 
+                                price_usd=price_usd, 
+                                percent_change_24h=percent_change_24h, 
                                 percent_change_1h=percent_change_1h, 
-                                percent_change_7d=percent_change_7d, price_btc=price_btc, 
-                                market_cap_usd=market_cap_usd, volume24=volume24, 
-                                volume24a=volume24a, csupply=csupply, tsupply=tsupply)
+                                percent_change_7d=percent_change_7d, 
+                                price_btc=price_btc, 
+                                market_cap_usd=market_cap_usd, 
+                                volume24=volume24, 
+                                volume24a=volume24a, 
+                                csupply=csupply, 
+                                tsupply=tsupply,
+                                ranking=ranking)
 
     def insertMultipleApiCriptomoneda(self, api_id, criptomoneda_ids):
         """Insertar múltiples relaciones entre API y criptomonedas en la tabla 'api_criptomonedas'."""
@@ -106,16 +128,20 @@ class dbORM:
     def fetchAllCriptomonedas(self):
         """Recupera todas las criptomonedas de la base de datos."""
         try:
-            result = self.session.execute(text("SELECT id, symbol FROM criptomonedas"))
+            # Eliminar la columna 'ranking' de la consulta
+            result = self.current_session.execute(text("SELECT id, name, symbol, msupply FROM criptomonedas"))
             rows = result.fetchall()
-            return rows  # Devuelve filas sin mapear a Cripto
+            # Convierte a una lista de diccionarios, incluyendo todas las columnas
+            return [{'id': row[0], 'name': row[1], 'symbol': row[2], 'msupply': row[3]} for row in rows]
         except Exception as e:
             print(f"Error al obtener criptomonedas: {str(e)}")
             return []
 
+
+
     def fetchOneCriptoBySymbol(self, symbol):
         """Obtener una criptomoneda por símbolo."""
-        result = self.session.execute(text(""" 
+        result = self.current_session.execute(text(""" 
             SELECT * FROM get_criptomoneda_by_symbol(:symbol);
         """), {'symbol': symbol}).fetchone()
 
@@ -123,7 +149,7 @@ class dbORM:
     
     def fetchOneApiByName(self, nombre):
         """Obtener una API por nombre."""
-        result = self.session.execute(text(""" 
+        result = self.current_session.execute(text(""" 
             SELECT * FROM fetchOneApiByName(:nombre);
         """), {'nombre': nombre}).fetchone()
         return result if result else None
@@ -131,5 +157,5 @@ class dbORM:
     def fetchOneRegisterId(self, criptoId):
         """Obtener el ID de un registro por ID de criptomoneda."""
         query = text("SELECT id FROM registros WHERE criptomoneda_id = :criptoId")
-        result = self.session.execute(query, {'criptoId': criptoId}).fetchone()
+        result = self.current_session.execute(query, {'criptoId': criptoId}).fetchone()
         return result.id if result else None

@@ -24,12 +24,10 @@ def processCryptos(dbInstance, cripto, api_id):
     registroService = RegistroService()
     ids_obtenidos = []
     
-    # Obtener todos los IDs de criptomonedas existentes
-    existing_cryptos = {crypto.symbol: crypto.id for crypto in dbInstance.fetchAllCriptomonedas()}
-
+    # Modificado para usar diccionarios
+    existing_cryptos = {crypto['symbol']: crypto['id'] for crypto in dbInstance.fetchAllCriptomonedas()}
     ids_todas = registroService.criptoTodas()
     
-    # Recopilar datos para la inserción en lotes
     new_cryptos = []
     registros = []
     relaciones = []
@@ -46,10 +44,9 @@ def processCryptos(dbInstance, cripto, api_id):
                 if existingCriptoId is None:
                     msupply = item.get('msupply') or 0
                     new_cryptos.append((item['name'], symbol, msupply))
-                    # Se obtiene el id mediante la inserción directa en la base de datos
                     existingCriptoId = dbInstance.insertCriptomoneda(item['name'], symbol, msupply)
 
-                # Valores del registro a insertar
+                # Mantener la columna 'rank' en los registros
                 registro_values = (
                     existingCriptoId,
                     float(item.get('price_usd') or 0),
@@ -61,7 +58,8 @@ def processCryptos(dbInstance, cripto, api_id):
                     float(item.get('volume24') or 0),
                     float(item.get('volume24a') or 0),
                     float(item.get('csupply') or 0),
-                    float(item.get('tsupply') or 0)
+                    float(item.get('tsupply') or 0),
+                    int(item.get('rank') or 0)  # Incluir rank aquí
                 )
 
                 registros.append(registro_values)
@@ -72,17 +70,16 @@ def processCryptos(dbInstance, cripto, api_id):
                 print(f"Error al procesar la criptomoneda {item['name']}: {str(e)}")
                 traceback.print_exc()
 
-    # Inserción masiva de criptomonedas
     if new_cryptos:
-        dbInstance.insertMultipleApiCriptomoneda(api_id, [crypto[1] for crypto in new_cryptos])
+        dbInstance.insertMultipleApiCriptomoneda(api_id, [crypto[0] for crypto in new_cryptos])
 
-    # Inserción masiva de registros
     if registros:
         dbInstance.insertMultipleRegisters(registros)
 
-    # Inserción de relaciones
     if relaciones:
-        dbInstance.insertMultipleApiCriptomoneda(api_id, [rel[1] for rel in relaciones])
+        dbInstance.insertMultipleApiCriptomoneda(api_id, [rel[0] for rel in relaciones])
+
+
 
 def dataLoader(dbInstance):
     """Carga los datos de las criptomonedas.""" 
@@ -102,3 +99,4 @@ def dataLoader(dbInstance):
         print(f"Carga de datos completada en {total_time:.2f} segundos. Esperando a la próxima ejecución...")
         
         time.sleep(40)
+
