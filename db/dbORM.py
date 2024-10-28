@@ -1,161 +1,204 @@
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, MetaData, text
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy.orm import scoped_session
 
-class dbORM:
-    def __init__(self, dbUrl):
-        self.engine = create_engine(dbUrl)
-        self.Session = scoped_session(sessionmaker(bind=self.engine))
+class dbDefinitions:
+    def __init__(self, db_url):
+        """Inicializa la conexión a la base de datos."""
+        self.engine = create_engine(db_url)
+        self.metadata = MetaData()
+        self.metadata.reflect(bind=self.engine)
 
-    def close(self):
-        """Cerrar la sesión."""
-        self.Session.remove()  # Close session properly
-
-    def __enter__(self):
-        """Context manager enter method."""
-        self.current_session = self.Session()
-        return self
-
-    def __exit__(self, exc_type, exc_value, traceback):
-        """Context manager exit method."""
-        self.close()
-
-    def insertRelationship(self, insert_function, **kwargs):
-        """Método genérico para insertar relaciones en la base de datos."""
+    def insert_data(self, table_name, data):
+        """Inserta múltiples registros en una tabla utilizando la función dynamic_insert."""
+        session = sessionmaker(bind=self.engine)()
         try:
-            self.current_session.execute(text(f"SELECT {insert_function}({', '.join(f':{k}' for k in kwargs.keys())});"), kwargs)
-            self.current_session.commit()
+            for entry in data:
+                if isinstance(entry, dict):
+                    columns = ', '.join(entry.keys())
+                    values = ', '.join([f"'{entry[key]}'" if isinstance(entry[key], str) else str(entry[key]) 
+                                        for key in entry.keys()])
+
+                    on_conflict = 'symbol' if table_name == 'criptomonedas' else 'id'  # Cambia esto según la tabla
+
+                    # Ejecutar la función directamente
+                    result = session.execute(text(f"""
+                        SELECT dynamic_insert(:table_name, :columns, :values, :on_conflict);
+                    """), {
+                        'table_name': table_name,
+                        'columns': columns,
+                        'values': values,
+                        'on_conflict': on_conflict
+                    }).fetchone()  # Usa fetchone() para obtener la primera fila
+
+                    # Acceder al resultado
+                    if result and result[0]:  # Asegúrate de acceder al primer elemento
+                        print(f"Resultado de la inserción: {result[0]}")  # Imprime el resultado
+                    else:
+                        print("Error: No se pudo obtener el resultado para la inserción.")
+
+                else:
+                    print(f"Entry is not a dictionary: {entry}")
+
+            session.commit()
+        except SQLAlchemyError as e:
+            print(f"Error durante la inserción en {table_name}: {e}")
+            session.rollback()
+        finally:
+            session.close()  # Cierra la sesión
+
+
+
+    def insertApi(self, data):
+        """Insertar múltiples registros en la tabla 'api'."""
+        session = sessionmaker(bind=self.engine)()
+        try:
+            for entry in data:
+                if isinstance(entry, dict):
+                    # Excluir 'id' si es autoincremental
+                    entry = {k: v for k, v in entry.items() if k != 'id'}
+
+                    # Crear la consulta de inserción
+                    columns = ', '.join(entry.keys())
+                    placeholders = ', '.join([f":{key}" for key in entry.keys()])
+
+                    insert_query = text(f"""
+                        INSERT INTO api ({columns}) VALUES ({placeholders})
+                    """)
+
+                    # Mensaje de depuración
+                    print(f"Insert query for API: {insert_query} - Values: {entry}")
+
+                    # Ejecutar la consulta
+                    session.execute(insert_query, entry)
+                else:
+                    print(f"Entry is not a dictionary: {entry}")
+
+            session.commit()
+        except SQLAlchemyError as e:
+            print(f"Error durante la inserción en la tabla 'api': {e}")
+            session.rollback()
+        finally:
+            session.close()
+
+    def insertCripto(self, data):
+        """Insertar múltiples registros en la tabla 'criptomonedas'."""
+        self.insert_data('criptomonedas', data)
+
+    def insertRegistro(self, data):
+        """Insertar múltiples registros en la tabla 'registros'."""
+        self.insert_data('registros', data)
+
+    def insertApiCriptomoneda(self, data):
+        """Insertar múltiples criptomonedas en la tabla 'api_criptomonedas' usando la función insert_api_criptomoneda."""
+        session = sessionmaker(bind=self.engine)()
+        try:
+            for entry in data:
+                if isinstance(entry, dict) and 'id' in entry and 'symbol' in entry and 'name' in entry:
+                    _id = entry['id']
+                    _symbol = entry['symbol']
+                    _name = entry['name']
+
+                    insert_query = text(f"""
+                        SELECT insert_api_criptomoneda(:_id, :_symbol, :_name) AS result;
+                    """)    
+
+                    result = session.execute(insert_query, {
+                        '_id': _id,
+                        '_symbol': _symbol,
+                        '_name': _name
+                    }).fetchone()   
+
+                    # Accede al campo `result` de la fila
+                    if result and result.result:
+                        print(result.result)  # Muestra el mensaje de resultado
+                    else:
+                        print(f"Error: No se pudo obtener el valor esperado de la función insert_api_criptomoneda para id={_id}")   
+
+            session.commit()
+        except SQLAlchemyError as e:
+            print(f"Error durante la inserción en la tabla 'api_criptomonedas': {e}")
+            session.rollback() 
+        finally:
+            session.close()
+
+    def insertAllRecordsInApiRegistros(self, api_id):
+        """Guarda todos los registros en la tabla intermedia 'api_registros'."""
+        session = sessionmaker(bind=self.engine)()
+        try:
+            # Recupera todos los registros de la tabla 'registros'
+            registros = self.fetchAllRegistros(session)  # Modificado para pasar la sesión
+            for registro in registros:
+                # Asegúrate de que 'id' sea la clave que estás usando para los registros
+                registro_id = registro['id']
+
+                # Inserta en la tabla intermedia
+                insert_query = text("""
+                    INSERT INTO api_registros (api_id, registro_id) VALUES (:api_id, :registro_id)
+                """)
+
+                session.execute(insert_query, {'api_id': api_id, 'registro_id': registro_id})  
+
+            session.commit()
+            print(f"Todos los registros han sido insertados en 'api_registros' para api_id={api_id}.")
+
+        except SQLAlchemyError as e:
+            print(f"Error durante la inserción en 'api_registros': {e}")
+            session.rollback() 
+        finally:
+            session.close()
+
+    def fetchAllRegistros(self, session):
+        """Recupera todos los registros de la base de datos."""
+        try:
+            result = session.execute(text("SELECT id FROM registros"))
+            rows = result.fetchall()
+            return [{'id': row[0]} for row in rows]
         except Exception as e:
-            self.current_session.rollback()
-            print(f"Error al insertar en {insert_function}: {e}")
-
-    def insertMultipleCryptocurrencies(self, cryptocurrencies):
-        """Insertar múltiples criptomonedas, evitando duplicados."""
-        existing_symbols = {row[0] for row in self.current_session.execute(text("SELECT symbol FROM criptomonedas;")).fetchall()}
-        new_cryptos = [(name, symbol, msupply) for name, symbol, msupply in cryptocurrencies if symbol not in existing_symbols]
-
-        for name, symbol, msupply in new_cryptos:
-            self.insertCriptomoneda(name, symbol, msupply)
-
-    def insertMultipleRegisters(self, registers):
-     """Insertar múltiples registros en la tabla 'registros'."""
-     for register in registers:
-         try:
-             cripto_id, price_usd, percent_change_24h, percent_change_1h, percent_change_7d, price_btc, market_cap_usd, volume24, volume24a, csupply, tsupply, ranking = register  # Asegúrate de incluir ranking aquí
-             self.insertRegister(cripto_id, price_usd, percent_change_24h, percent_change_1h,
-                                 percent_change_7d, price_btc, market_cap_usd, volume24, volume24a, csupply, tsupply, ranking)
-         except ValueError as e:
-             print(f"Error unpacking register: {register}. Error: {e}")
-
-
-    def insertApi(self, nombre, url, metodo, cantidad_parametros, tipo_autenticacion, 
-                  formato_respuesta, limite_uso, tiempo_respuesta_promedio_ms, estado='activo'):
-        """Insertar un nuevo registro en la tabla 'api'."""
-        self.insertRelationship('insert_api', nombre=nombre, url=url, metodo=metodo, 
-                                cantidad_parametros=cantidad_parametros, 
-                                tipo_autenticacion=tipo_autenticacion, 
-                                formato_respuesta=formato_respuesta, 
-                                limite_uso=limite_uso, 
-                                tiempo_respuesta_promedio_ms=tiempo_respuesta_promedio_ms, 
-                                estado=estado)
-
-    def insertRegister(self, criptomoneda_id, price_usd, percent_change_24h, percent_change_1h,
-                   percent_change_7d, price_btc, market_cap_usd, volume24, volume24a, 
-                   csupply, tsupply, ranking):
-        """Insertar un nuevo registro en la tabla 'registros' usando la función de PostgreSQL."""
-        self.insertRelationship('insert_register', 
-                                criptomoneda_id=criptomoneda_id, 
-                                price_usd=price_usd, 
-                                percent_change_24h=percent_change_24h, 
-                                percent_change_1h=percent_change_1h, 
-                                percent_change_7d=percent_change_7d, 
-                                price_btc=price_btc, 
-                                market_cap_usd=market_cap_usd, 
-                                volume24=volume24, 
-                                volume24a=volume24a, 
-                                csupply=csupply, 
-                                tsupply=tsupply,
-                                ranking=ranking)
-
-    def insertMultipleApiCriptomoneda(self, api_id, criptomoneda_ids):
-        """Insertar múltiples relaciones entre API y criptomonedas en la tabla 'api_criptomonedas'."""
-        self.insertRelationship('insert_multiple_api_criptomonedas', api_id=api_id, criptomoneda_ids=criptomoneda_ids)
-
-    def insertMultipleApiMercado(self, api_id, mercado_ids):
-        """Insertar múltiples relaciones entre API y mercados en la tabla 'api_mercados'."""
-        self.insertRelationship('insert_multiple_api_mercados', api_id=api_id, mercado_ids=mercado_ids)
-
-    def insertMultipleApiRegistro(self, api_id, registro_ids):
-        """Insertar múltiples relaciones entre API y registros en la tabla 'api_registros'."""
-        self.insertRelationship('insert_multiple_api_registros', api_id=api_id, registro_ids=registro_ids)
-
-    def insertMultipleApiMetricaGeneral(self, api_id, metrica_ids):
-        """Insertar múltiples relaciones entre API y métricas generales en la tabla 'api_metricas_generales'."""
-        self.insertRelationship('insert_multiple_api_metricas_generales', api_id=api_id, metrica_ids=metrica_ids)
-
-    def insertMultipleApiExchange(self, api_id, exchange_ids):
-        """Insertar múltiples relaciones entre API y exchanges en la tabla 'api_exchanges'."""
-        self.insertRelationship('insert_multiple_api_exchanges', api_id=api_id, exchange_ids=exchange_ids)
-
-    def insertExchange(self, name, name_id, volume_usd, active_pairs, country, url):
-        """Insertar un nuevo registro en la tabla 'exchanges'."""
-        self.insertRelationship('insert_exchange', name=name, name_id=name_id, 
-                                volume_usd=volume_usd, active_pairs=active_pairs, 
-                                country=country, url=url)
-
-    def insertMercadoActivo(self, market_name, base_symbol, quote_symbol, price_usd, volume_usd, exchange_id):
-        """Insertar un nuevo registro en la tabla 'mercados_activos'."""
-        self.insertRelationship('insert_mercado_activo', market_name=market_name, 
-                                base_symbol=base_symbol, quote_symbol=quote_symbol, 
-                                price_usd=price_usd, volume_usd=volume_usd, 
-                                exchange_id=exchange_id)
-
-    def insertMetricaGeneral(self, coins_count, active_markets, total_mcap, total_volume, 
-                             btc_d, eth_d, mcap_change, volume_change, 
-                             avg_change_percent, volume_ath, mcap_ath):
-        """Insertar un nuevo registro en la tabla 'metrica_general'."""
-        self.insertRelationship('insert_metrica_general', coins_count=coins_count, 
-                                active_markets=active_markets, total_mcap=total_mcap, 
-                                total_volume=total_volume, btc_d=btc_d, eth_d=eth_d, 
-                                mcap_change=mcap_change, volume_change=volume_change, 
-                                avg_change_percent=avg_change_percent, 
-                                volume_ath=volume_ath, mcap_ath=mcap_ath)
-
-    def insertCriptomoneda(self, name, symbol, msupply):
-        """Insertar un nuevo registro en la tabla 'criptomonedas'."""
-        self.insertRelationship('insert_criptomoneda', name=name, symbol=symbol, msupply=msupply)
+            print(f"Error al obtener registros: {str(e)}")
+            return []
 
     def fetchAllCriptomonedas(self):
         """Recupera todas las criptomonedas de la base de datos."""
+        session = sessionmaker(bind=self.engine)()
         try:
-            # Eliminar la columna 'ranking' de la consulta
-            result = self.current_session.execute(text("SELECT id, name, symbol, msupply FROM criptomonedas"))
+            result = session.execute(text("SELECT id, name, symbol, msupply FROM criptomonedas"))
             rows = result.fetchall()
-            # Convierte a una lista de diccionarios, incluyendo todas las columnas
             return [{'id': row[0], 'name': row[1], 'symbol': row[2], 'msupply': row[3]} for row in rows]
         except Exception as e:
             print(f"Error al obtener criptomonedas: {str(e)}")
             return []
-
-
+        finally:
+            session.close()
 
     def fetchOneCriptoBySymbol(self, symbol):
         """Obtener una criptomoneda por símbolo."""
-        result = self.current_session.execute(text(""" 
-            SELECT * FROM get_criptomoneda_by_symbol(:symbol);
-        """), {'symbol': symbol}).fetchone()
+        session = sessionmaker(bind=self.engine)()
+        try:
+            result = session.execute(text(""" 
+                SELECT * FROM get_criptomoneda_by_symbol(:symbol);
+            """), {'symbol': symbol}).fetchone()
+            return result if result else None
+        finally:
+            session.close()
 
-        return result if result else None
-    
     def fetchOneApiByName(self, nombre):
-        """Obtener una API por nombre."""
-        result = self.current_session.execute(text(""" 
-            SELECT * FROM fetchOneApiByName(:nombre);
-        """), {'nombre': nombre}).fetchone()
-        return result if result else None
-        
+        """Obtener una API por nombre y retornar toda la fila."""
+        session = sessionmaker(bind=self.engine)()
+        try:
+            result = session.execute(text("""
+                SELECT * FROM fetchOneApiByName(:nombre);
+            """), {'nombre': nombre}).fetchone()
+            return result if result else None
+        finally:
+            session.close()
+
     def fetchOneRegisterId(self, criptoId):
         """Obtener el ID de un registro por ID de criptomoneda."""
-        query = text("SELECT id FROM registros WHERE criptomoneda_id = :criptoId")
-        result = self.current_session.execute(query, {'criptoId': criptoId}).fetchone()
-        return result.id if result else None
+        session = sessionmaker(bind=self.engine)()
+        try:
+            query = text("SELECT id FROM registros WHERE criptomoneda_id = :criptoId")
+            result = session.execute(query, {'criptoId': criptoId}).fetchone()
+            return result[0] if result else None  # Cambiado para acceder al primer elemento
+        finally:
+            session.close() 

@@ -1,7 +1,3 @@
-"""
-Operaciones para guardar los datos en un archivo txt
-"""
-
 import os
 import json
 
@@ -11,6 +7,7 @@ class RegistroService:
         self.criptoRegistrado = self._loadFromFile()
 
     def _loadFromFile(self):
+        """Carga los datos del archivo JSON, si existe."""
         if os.path.exists(self.archivo):
             try:
                 with open(self.archivo, 'r') as file:
@@ -60,6 +57,6 @@ class RegistroService:
         # Actualiza la lista de IDs registrados
         self.criptoRegistrado['idsRegistrados'].extend(idsNuevos)
         
-        # Guarda los cambios en el archivo JSON
+        # Guarda los nuevos IDs en el archivo JSON
         self.criptoRegistrado['idsNuevos'] = idsNuevos
         self._saveToFile()
