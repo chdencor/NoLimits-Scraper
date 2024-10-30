@@ -9,7 +9,7 @@ import datetime
 class dbDefinitions:
     def __init__(self, db_url):
         """Inicializa la conexión a la base de datos."""
-        self.engine = create_async_engine(db_url, echo=False, pool_pre_ping=True, connect_args={"prepared_statement_cache_size": 0})
+        self.engine = create_async_engine(db_url, echo=False)
         self.SessionLocal = sessionmaker(bind=self.engine, class_=AsyncSession, expire_on_commit=False)
 
     async def insert_data(self, table_name, data):
