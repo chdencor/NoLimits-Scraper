@@ -1,3 +1,5 @@
+import asyncio
+import hashlib
 import datetime
 import time
 import traceback
@@ -6,24 +8,14 @@ from services.RawRegisterService import RegistroService
 from db.dbORM import dbDefinitions
 from models.APICriptoTicker import APICripto
 
-def handle_insertion_result(result):
-    if result and len(result) > 0:
-        print(f"Resultado de la inserción: {result[0]} - {result[1]}")  # Ajusta esto según la estructura
-    else:
-        print("Error: No se pudo obtener el resultado para la inserción.")
+def generateCryptoHash(crypto_id, symbol):
+    hash_input = f"{crypto_id}:{symbol}".encode('utf-8')
+    return hashlib.sha256(hash_input).hexdigest()
 
-def execute_with_error_handling(session, query, params):
+async def insertApiIfNotExists(dbInstance, api_name, api_url):
     try:
-        return session.execute(query, params).fetchone()
-    except Exception as e:  # Es mejor manejar excepciones más específicas si es posible
-        print(f"Error ejecutando la consulta: {str(e)}")
-        traceback.print_exc()
-        return None
-
-def insertApiIfNotExists(dbInstance, api_name, api_url):
-    try:
-        existing_api = dbInstance.fetchOneApiByName(api_name)
-        if not existing_api:
+        existing_api = await dbInstance.fetchOneApiByName(api_name)
+        if existing_api is None:
             ahora = datetime.datetime.now()
             api_data = {
                 'nombre': api_name,
@@ -37,96 +29,130 @@ def insertApiIfNotExists(dbInstance, api_name, api_url):
                 'estado': 'activo',
                 'tipo_autenticacion': None
             }
-            result = dbInstance.insertApi([api_data])
-            handle_insertion_result(result)
-            return dbInstance.fetchOneApiByName(api_name).id 
-        return existing_api.id
+            await dbInstance.insertApi([api_data])
+            # Volver a buscar la API ya que ahora debería existir
+            existing_api = await dbInstance.fetchOneApiByName(api_name)
+        
+        # Si ya existe, devolver su id
+        return existing_api.id if existing_api else None
     except Exception as e:
         print(f"Error al insertar la API: {str(e)}")
         traceback.print_exc()
 
-def processCryptos(dbInstance, cripto, api_id):
+
+async def insertCryptos(dbInstance, new_criptomonedas):
+    if new_criptomonedas:
+        print(f"Inserting new cryptocurrencies: {new_criptomonedas}")
+        await dbInstance.insertCripto(new_criptomonedas)
+
+async def insertApiCryptos(dbInstance, new_api_criptomonedas):
+    if new_api_criptomonedas:
+        print(f"Inserting new API cryptocurrencies: {new_api_criptomonedas}")
+        await dbInstance.insertApiCriptomoneda(new_api_criptomonedas)
+
+async def insertRegistros(dbInstance, registros):
+    if registros:
+        print(f"Inserting new records: {registros}")
+        await dbInstance.insertRegistro(registros)
+
+async def processCryptos(dbInstance, cripto, api_id):
     registroService = RegistroService()
-    ids_obtenidos = []
-    
-    existing_cryptos = {crypto['symbol']: crypto['id'] for crypto in dbInstance.fetchAllCriptomonedas()}
-    ids_todas = registroService.criptoTodas()
-    
-    new_cryptos = []
+    ids_obtenidos = set()
+    existing_cryptos = {crypto['symbol']: crypto['id'] for crypto in await dbInstance.fetchAllCriptomonedas()}
+    ids_todas = registroService.criptoTodas()  # Call without await
+
+    new_api_criptomonedas = []
+    new_criptomonedas = []
     registros = []
+    processed_hashes = set()
 
     try:
         for crypto_id in ids_todas:
-            item = cripto.getCriptoData(crypto_id)
-            
-            if item and item['id'] not in ids_obtenidos:
-                ids_obtenidos.append(item['id'])
+            print(f"Fetching data for crypto_id: {crypto_id}")  # Debugging
+            item = cripto.getCriptoData(crypto_id)  # Consider not using await
+            if item is None:
+                continue  # Skip if item is None
+
+            if item['id'] not in ids_obtenidos:
+                ids_obtenidos.add(item['id'])
                 symbol = item['symbol']
                 existingCriptoId = existing_cryptos.get(symbol)
 
+                # Generate a hash for the cryptocurrency
+                crypto_hash = generateCryptoHash(item['id'], symbol)
+
+                if crypto_hash in processed_hashes:
+                    continue
+
+                processed_hashes.add(crypto_hash)
+
+                # Handle new cryptocurrency insertions
                 if existingCriptoId is None:
                     msupply = item.get('msupply') or 0
-                    new_crypto = {
+                    new_cripto = {
                         'id': item['id'],
                         'name': item['name'],
                         'symbol': symbol,
                         'msupply': msupply
                     }
-                    new_cryptos.append(new_crypto)
+                    new_criptomonedas.append(new_cripto)
 
-                    # Inserta la criptomoneda y obtiene el ID, solo si no existe
-                    result = dbInstance.insertApiCriptomoneda(new_cryptos)
-                    handle_insertion_result(result)
-                    existingCriptoId = dbInstance.fetchOneCriptoBySymbol(symbol).id  
-                    
-                    if existingCriptoId is None:
-                        print(f"Error: No se pudo obtener un ID para la criptomoneda {symbol}")
-                        continue
+                if existingCriptoId is not None:
+                    new_api_crypto = {
+                        'api_id': api_id,
+                        'criptomoneda_id': existingCriptoId
+                    }
+                    new_api_criptomonedas.append(new_api_crypto)
 
-                registro_values = {
-                    'criptomoneda_id': existingCriptoId,
-                    'price_usd': float(item.get('price_usd') or 0),
-                    'percent_change_24h': float(item.get('percent_change_24h') or 0),
-                    'percent_change_1h': float(item.get('percent_change_1h') or 0),
-                    'percent_change_7d': float(item.get('percent_change_7d') or 0),
-                    'price_btc': float(item.get('price_btc') or 0),
-                    'market_cap_usd': float(item.get('market_cap_usd') or 0),
-                    'volume24': float(item.get('volume24') or 0),
-                    'volume24a': float(item.get('volume24a') or 0),
-                    'csupply': float(item.get('csupply') or 0),
-                    'tsupply': float(item.get('tsupply') or 0),
-                    'rank': int(item.get('rank') or 0)
-                }
-
-                registros.append(registro_values)
+                # Add a new record with the cryptocurrency data
+                if existingCriptoId is not None:
+                    registro_values = {
+                        'criptomoneda_id': existingCriptoId,
+                        'price_usd': float(item.get('price_usd') or 0),
+                        'percent_change_24h': float(item.get('percent_change_24h') or 0),
+                        'percent_change_1h': float(item.get('percent_change_1h') or 0),
+                        'percent_change_7d': float(item.get('percent_change_7d') or 0),
+                        'price_btc': float(item.get('price_btc') or 0),
+                        'market_cap_usd': float(item.get('market_cap_usd') or 0),
+                        'volume24': float(item.get('volume24') or 0),
+                        'volume24a': float(item.get('volume24a') or 0),
+                        'csupply': float(item.get('csupply') or 0),
+                        'tsupply': float(item.get('tsupply') or 0),
+                        'rank': int(item.get('rank') or 0)
+                    }
+                    if all(value is not None for value in registro_values.values()):
+                        registros.append(registro_values)
 
     except Exception as e:
         print(f"Error al procesar criptomonedas: {str(e)}")
         traceback.print_exc()
 
-    finally:
-        if new_cryptos:
-            result = dbInstance.insertApiCriptomoneda(new_cryptos)
-            handle_insertion_result(result)
+    # Insert in parallel
+    await asyncio.gather(
+        insertCryptos(dbInstance, new_criptomonedas),
+        insertApiCryptos(dbInstance, new_api_criptomonedas),
+        insertRegistros(dbInstance, registros)
+    )
 
-        if registros:
-            result = dbInstance.insertRegistro(registros)
-            handle_insertion_result(result)
-
-def dataLoader(dbInstance):
+async def dataLoader(dbInstance):
     cripto = CriptoService()
     api = APICripto()
 
-    api_id = insertApiIfNotExists(dbInstance, "CoinLore", api.url)
+    # Llamar a la función insertApiIfNotExists para insertar la API
+    api_id = await insertApiIfNotExists(dbInstance, "CoinLore", api.url)
     if api_id is None:
         return
 
     while True:
         start_time = time.time()
-        processCryptos(dbInstance, cripto, api_id)
+        await processCryptos(dbInstance, cripto, api_id)
         end_time = time.time()
-        
+
         total_time = end_time - start_time
         print(f"Carga de datos completada en {total_time:.2f} segundos. Esperando a la próxima ejecución...")
-        
-        time.sleep(40)
+
+        await asyncio.sleep(40)
+
+# Método para iniciar el bucle de eventos
+def runDbBroker(dbInstance):
+    asyncio.run(dataLoader(dbInstance))
