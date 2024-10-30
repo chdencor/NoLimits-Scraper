@@ -1,11 +1,11 @@
-# CriptoVisualizer Scraper
+# No Limits
 ## _Obtención de datos actuales de criptomonedas en tiempo real_
 
 [ESP]
-CriptoVisualizer Scraper es un programa en lotes/crontab que permite cargar los datos desde una API a una base de datos en Supabase para utilizar en una página web con datos analíticos.
+No Limits es un programa en lotes/crontab que permite cargar los datos desde una API a una base de datos en Supabase para utilizar en una página web con datos analíticos.
 
 [ENG]
-CriptoVisualizer Scraper is a batch/crontab program that loads data from an API into a Supabase database for use in a data analytics web page.
+No Limits is a batch/crontab program that loads data from an API into a Supabase database for use in a data analytics web page.
 
 ---
 
