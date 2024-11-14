@@ -2,8 +2,7 @@ import datetime
 import time
 import traceback
 from services.CriptoService import CriptoService
-from services.RawRegisterService import RegistroService
-from db.dbORM import dbDefinitions
+import db.dbORM
 from models.APICriptoTicker import APICripto
 
 def handle_insertion_result(result):
@@ -14,16 +13,19 @@ def handle_insertion_result(result):
 
 def execute_with_error_handling(session, query, params):
     try:
+        print(f"Ejecutando consulta: {query} con parámetros: {params}")
         return session.execute(query, params).fetchone()
-    except Exception as e:  # Es mejor manejar excepciones más específicas si es posible
+    except Exception as e:
         print(f"Error ejecutando la consulta: {str(e)}")
         traceback.print_exc()
         return None
 
 def insertApiIfNotExists(dbInstance, api_name, api_url):
     try:
+        print(f"Verificando existencia de la API: {api_name}")
         existing_api = dbInstance.fetchOneApiByName(api_name)
         if not existing_api:
+            print(f"La API {api_name} no existe, insertando...")
             ahora = datetime.datetime.now()
             api_data = {
                 'nombre': api_name,
@@ -39,32 +41,35 @@ def insertApiIfNotExists(dbInstance, api_name, api_url):
             }
             result = dbInstance.insertApi([api_data])
             handle_insertion_result(result)
+            print(f"API insertada con éxito, obteniendo el ID {api_name}...")
             return dbInstance.fetchOneApiByName(api_name).id 
+        print(f"La API {api_name} ya existe con ID: {existing_api.id}")
         return existing_api.id
     except Exception as e:
         print(f"Error al insertar la API: {str(e)}")
         traceback.print_exc()
 
 def processCryptos(dbInstance, cripto, api_id):
-    registroService = RegistroService()
     ids_obtenidos = []
-    
+    print("Obteniendo todas las criptomonedas registradas...")
     existing_cryptos = {crypto['symbol']: crypto['id'] for crypto in dbInstance.fetchAllCriptomonedas()}
-    ids_todas = registroService.criptoTodas()
+    ids_todas = cripto.all_ids  # Obtiene todas las IDs de las criptomonedas disponibles
     
-    new_cryptos = []
     registros = []
 
     try:
         for crypto_id in ids_todas:
+            print(f"\n--- Procesando criptomoneda con ID: {crypto_id} ---")
             item = cripto.getCriptoData(crypto_id)
             
             if item and item['id'] not in ids_obtenidos:
+                print(f"Datos obtenidos de la criptomoneda: {item}")
                 ids_obtenidos.append(item['id'])
                 symbol = item['symbol']
                 existingCriptoId = existing_cryptos.get(symbol)
 
                 if existingCriptoId is None:
+                    print(f"No se encontró la criptomoneda {symbol} en la base de datos, intentando agregarla...")
                     msupply = item.get('msupply') or 0
                     new_crypto = {
                         'id': item['id'],
@@ -72,16 +77,27 @@ def processCryptos(dbInstance, cripto, api_id):
                         'symbol': symbol,
                         'msupply': msupply
                     }
-                    new_cryptos.append(new_crypto)
-
-                    # Inserta la criptomoneda y obtiene el ID, solo si no existe
-                    result = dbInstance.insertApiCriptomoneda(new_cryptos)
-                    handle_insertion_result(result)
-                    existingCriptoId = dbInstance.fetchOneCriptoBySymbol(symbol).id  
+                    print(f"Intentando insertar nueva criptomoneda: {new_crypto}")
                     
+                    # Inserta la criptomoneda en la base de datos
+                    result = dbInstance.insertCripto([new_crypto])
+                    handle_insertion_result(result)
+
+                    # Recupera el ID de la criptomoneda recién insertada
+                    existingCripto = dbInstance.fetchOneCriptoBySymbol(symbol)
+                    existingCriptoId = existingCripto['id'] if existingCripto else None
+
                     if existingCriptoId is None:
-                        print(f"Error: No se pudo obtener un ID para la criptomoneda {symbol}")
+                        print(f"Error: No se pudo obtener un ID para la criptomoneda {symbol} después de insertarla.")
                         continue
+                    print(f"Criptomoneda {symbol} insertada exitosamente con ID {existingCriptoId}")
+
+                    # Inserta en la tabla de relación api_criptomoneda
+                    print(f"Insertando en api_criptomoneda la relación: api_id={api_id}, criptomoneda_id={existingCriptoId}")
+                    dbInstance.insertApiCriptomoneda([{'api_id': api_id, 'criptomoneda_id': existingCriptoId}])
+
+                else:
+                    print(f"La criptomoneda {symbol} ya existe con ID {existingCriptoId}.")
 
                 registro_values = {
                     'criptomoneda_id': existingCriptoId,
@@ -97,6 +113,7 @@ def processCryptos(dbInstance, cripto, api_id):
                     'tsupply': float(item.get('tsupply') or 0),
                     'rank': int(item.get('rank') or 0)
                 }
+                print(f"Datos para insertar en el registro: {registro_values}")
 
                 registros.append(registro_values)
 
@@ -105,13 +122,11 @@ def processCryptos(dbInstance, cripto, api_id):
         traceback.print_exc()
 
     finally:
-        if new_cryptos:
-            result = dbInstance.insertApiCriptomoneda(new_cryptos)
-            handle_insertion_result(result)
-
         if registros:
+            print("Iniciando inserción de registros de criptomonedas...")
             result = dbInstance.insertRegistro(registros)
             handle_insertion_result(result)
+
 
 def dataLoader(dbInstance):
     cripto = CriptoService()
@@ -119,10 +134,12 @@ def dataLoader(dbInstance):
 
     api_id = insertApiIfNotExists(dbInstance, "CoinLore", api.url)
     if api_id is None:
+        print("Error: No se pudo obtener el ID de la API. Terminando ejecución.")
         return
 
     while True:
         start_time = time.time()
+        print("Iniciando proceso de carga de criptomonedas...")
         processCryptos(dbInstance, cripto, api_id)
         end_time = time.time()
         

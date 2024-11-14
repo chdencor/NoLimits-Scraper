@@ -176,7 +176,7 @@ class dbDefinitions:
         session = sessionmaker(bind=self.engine)()
         try:
             result = session.execute(text(""" 
-                SELECT * FROM get_criptomoneda_by_symbol(:symbol);
+                SELECT * FROM get_cripto_by_symbol(:symbol);
             """), {'symbol': symbol}).fetchone()
             return result if result else None
         finally:
