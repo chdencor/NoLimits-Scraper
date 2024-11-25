@@ -5,12 +5,6 @@ from services.CriptoService import CriptoService
 import db.dbORM
 from models.APICriptoTicker import APICripto
 
-def handle_insertion_result(result):
-    if result and len(result) > 0:
-        print(f"Resultado de la inserción: {result[0]} - {result[1]}")  # Ajusta esto según la estructura
-    else:
-        print("Error: No se pudo obtener el resultado para la inserción.")
-
 def execute_with_error_handling(session, query, params):
     try:
         print(f"Ejecutando consulta: {query} con parámetros: {params}")
@@ -40,7 +34,6 @@ def insertApiIfNotExists(dbInstance, api_name, api_url):
                 'tipo_autenticacion': None
             }
             result = dbInstance.insertApi([api_data])
-            handle_insertion_result(result)
             print(f"API insertada con éxito, obteniendo el ID {api_name}...")
             return dbInstance.fetchOneApiByName(api_name).id 
         print(f"La API {api_name} ya existe con ID: {existing_api.id}")
@@ -81,7 +74,7 @@ def processCryptos(dbInstance, cripto, api_id):
                     
                     # Inserta la criptomoneda en la base de datos
                     result = dbInstance.insertCripto([new_crypto])
-                    handle_insertion_result(result)
+                    # handle_insertion_result(result)
 
                     # Recupera el ID de la criptomoneda recién insertada
                     existingCripto = dbInstance.fetchOneCriptoBySymbol(symbol)
@@ -125,7 +118,6 @@ def processCryptos(dbInstance, cripto, api_id):
         if registros:
             print("Iniciando inserción de registros de criptomonedas...")
             result = dbInstance.insertRegistro(registros)
-            handle_insertion_result(result)
 
 
 def dataLoader(dbInstance):

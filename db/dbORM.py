@@ -10,42 +10,52 @@ class dbDefinitions:
         self.metadata.reflect(bind=self.engine)
 
     def insert_data(self, table_name, data):
-        """Inserta múltiples registros en una tabla utilizando la función dynamic_insert."""
+        """Inserta múltiples registros en una tabla utilizando savepoints."""
         session = sessionmaker(bind=self.engine)()
         try:
-            for entry in data:
-                if isinstance(entry, dict):
-                    columns = ', '.join(entry.keys())
-                    values = ', '.join([f"'{entry[key]}'" if isinstance(entry[key], str) else str(entry[key]) 
-                                        for key in entry.keys()])
+            for idx, entry in enumerate(data):
+                savepoint_name = f"savepoint_{idx}"  # Crear un nombre único para cada savepoint
+                session.connection().execute(text(f"SAVEPOINT {savepoint_name}"))
+                try:
+                    if isinstance(entry, dict):
+                        columns = ', '.join(entry.keys())
+                        values = ', '.join(
+                            [f"'{entry[key]}'" if isinstance(entry[key], str) else str(entry[key]) for key in entry.keys()]
+                        )
+                        on_conflict = 'symbol' if table_name == 'criptomonedas' else 'id'
 
-                    on_conflict = 'symbol' if table_name == 'criptomonedas' else 'id'  # Cambia esto según la tabla
+                        # Ejecutar la función directamente
+                        result = session.execute(text(f"""
+                            SELECT dynamic_insert(:table_name, :columns, :values, :on_conflict);
+                        """), {
+                            'table_name': table_name,
+                            'columns': columns,
+                            'values': values,
+                            'on_conflict': on_conflict
+                        }).fetchone()
 
-                    # Ejecutar la función directamente
-                    result = session.execute(text(f"""
-                        SELECT dynamic_insert(:table_name, :columns, :values, :on_conflict);
-                    """), {
-                        'table_name': table_name,
-                        'columns': columns,
-                        'values': values,
-                        'on_conflict': on_conflict
-                    }).fetchone()  # Usa fetchone() para obtener la primera fila
-
-                    # Acceder al resultado
-                    if result and result[0]:  # Asegúrate de acceder al primer elemento
-                        print(f"Resultado de la inserción: {result[0]}")  # Imprime el resultado
+                        if result and result[0]:
+                            print(f"Resultado de la inserción: {result[0]}")
+                        else:
+                            print(f"Advertencia: No se pudo insertar el registro: {entry}")
                     else:
-                        print("Error: No se pudo obtener el resultado para la inserción.")
+                        print(f"Error: La entrada no es un diccionario: {entry}")
 
-                else:
-                    print(f"Entry is not a dictionary: {entry}")
+                    session.connection().execute(text(f"RELEASE SAVEPOINT {savepoint_name}"))
+                except SQLAlchemyError as e:
+                    print(f"Error al insertar el registro {entry} en {table_name}: {e}")
+                    session.connection().execute(text(f"ROLLBACK TO SAVEPOINT {savepoint_name}"))
+                    # Continuar con el siguiente registro.
 
+            # Confirma todos los cambios realizados
             session.commit()
+
         except SQLAlchemyError as e:
-            print(f"Error durante la inserción en {table_name}: {e}")
+            print(f"Error durante la transacción en {table_name}: {e}")
             session.rollback()
         finally:
-            session.close()  # Cierra la sesión
+            session.close()
+
 
 
 
